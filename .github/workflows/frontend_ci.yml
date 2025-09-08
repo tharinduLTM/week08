@@ -16,12 +16,10 @@ on:
 
 # Define global environment variables that can be used across jobs
 env:
-  # ACR Login Server (e.g., myregistry.azurecr.io)
-  # This needs to be set as a GitHub Repository Secret
-  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
-  # Dynamically generate image tags based on Git SHA and GitHub Run ID
-  # This provides unique, traceable tags for each image build
+  ACR_NAME: ${{ secrets.AZURE_CONTAINER_REGISTRY }}       # short name e.g. w08thariacr
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}       # full FQDN e.g. w08thariacr.azurecr.io
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+
 
 jobs:
   build_and_push_frontend:
