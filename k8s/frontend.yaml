@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: frontend-container
-        image: durgeshsamariya.azurecr.io/frontend:latest
+        image: w08thariacr.azurecr.io/product_service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 80
