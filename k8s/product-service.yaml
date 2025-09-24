@@ -1,5 +1,3 @@
-# week08/k8s/product-service.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,59 +14,69 @@ spec:
       labels:
         app: product-service
     spec:
-      # [MOD] allow the pod to pull from ACR using the secret created by the workflow
       imagePullSecrets:
         - name: acr-pull
-
       containers:
-      - name: product-service-container
-        # [MOD] point to your ACR (w08tmtlt)
-        image: w08tmtlt.azurecr.io/product_service:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8000
-        env:
-        # Database connection details
-        - name: POSTGRES_HOST
-          value: product-db-service-w08e1
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: PRODUCTS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: POSTGRES_PASSWORD
+        - name: product-service-container
+          image: w08tmtlt.azurecr.io/product_service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_HOST
+              value: product-db-service-w08e1
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-w08e1
+                  key: PRODUCTS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: POSTGRES_PASSWORD
+            - name: AZURE_STORAGE_ACCOUNT_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: AZURE_STORAGE_ACCOUNT_NAME
+            - name: AZURE_STORAGE_ACCOUNT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: AZURE_STORAGE_ACCOUNT_KEY
+            - name: AZURE_STORAGE_CONTAINER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-w08e1
+                  key: AZURE_STORAGE_CONTAINER_NAME
+            - name: AZURE_SAS_TOKEN_EXPIRY_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-w08e1
+                  key: AZURE_SAS_TOKEN_EXPIRY_HOURS
 
-        # Optional Azure Blob config (kept from your file)
-        - name: AZURE_STORAGE_ACCOUNT_NAME
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: AZURE_STORAGE_ACCOUNT_NAME
-        - name: AZURE_STORAGE_ACCOUNT_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: AZURE_STORAGE_ACCOUNT_KEY
-        - name: AZURE_STORAGE_CONTAINER_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: AZURE_STORAGE_CONTAINER_NAME
-        - name: AZURE_SAS_TOKEN_EXPIRY_HOURS
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: AZURE_SAS_TOKEN_EXPIRY_HOURS
-
+          # Health probes so the Deployment becomes Ready only when the API is up
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 45
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
