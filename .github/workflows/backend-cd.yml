@@ -39,10 +39,26 @@ jobs:
         run: |
           az aks get-credentials --resource-group ${{ github.event.inputs.aks_resource_group }} --name ${{ github.event.inputs.aks_cluster_name }} --overwrite-existing
 
-      #- name: Attach ACR
-      #  run: |
-        #  az aks update --name ${{ github.event.inputs.aks_cluster_name }} --resource-group ${{ github.event.inputs.aks_resource_group }} --attach-acr ${{ github.event.inputs.aks_acr_name }}
+        # [MOD] Best-effort ACR attach (skip error if RBAC cannot create role assignment)
+      - name: Attach ACR (best-effort)
+        run: |
+          echo "Attempting az aks update --attach-acr … (RBAC errors will be ignored)"
+          az aks update \
+            --name ${{ inputs.aks_cluster_name }} \
+            --resource-group ${{ inputs.aks_resource_group }} \
+            --attach-acr ${{ env.ACR_NAME }} || true
 
+# [MOD] (Optional fallback) Create imagePullSecret for ACR; requires ACR_USERNAME/ACR_PASSWORD repo secrets
+      - name: Create imagePullSecret
+        run: |
+          kubectl get ns ${{ inputs.namespace }} >/dev/null 2>&1 || kubectl create ns ${{ inputs.namespace }}
+          kubectl -n ${{ inputs.namespace }} delete secret acr-pull --ignore-not-found
+          kubectl -n ${{ inputs.namespace }} create secret docker-registry acr-pull \
+            --docker-server=${{ env.ACR_LOGIN_SERVER }} \
+            --docker-username='${{ secrets.ACR_USERNAME }}' \
+            --docker-password='${{ secrets.ACR_PASSWORD }}'
+
+      
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         run: |
           echo "Deploying backend infrastructure..."
