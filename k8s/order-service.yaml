@@ -1,9 +1,7 @@
-# week08/k8s/order-service.yaml
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: order-service-w08e1 # Deployment name matches
+  name: order-service-w08e1
   labels:
     app: order-service
 spec:
@@ -16,35 +14,51 @@ spec:
       labels:
         app: order-service
     spec:
+      imagePullSecrets:
+        - name: acr-pull
       containers:
-      - name: order-service-container
-        image: w08thariacr.azurecr.io/order_service:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 8001
-        env:
-        - name: POSTGRES_HOST
-          value: order-db-service-w08e1
-        - name: POSTGRES_DB
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: ORDERS_DB_NAME
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ecomm-secrets-w08e1
-              key: POSTGRES_PASSWORD
-        - name: PRODUCT_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: PRODUCT_SERVICE_URL
+        - name: order-service-container
+          image: w08tmtlt.azurecr.io/order_service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+          env:
+            - name: POSTGRES_HOST
+              value: order-db-service-w08e1
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: ecomm-config-w08e1
+                  key: ORDERS_DB_NAME
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecomm-secrets-w08e1
+                  key: POSTGRES_PASSWORD
+            - name: PRODUCT_SERVICE_URL
+              value: http://product-service-w08e1:8000
+
+          # Health probes so the Deployment becomes Ready only when the API is up
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 45
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
