@@ -1,90 +1,67 @@
-# week08/.github/workflows/backend_ci.yml
+name: Backend CI — Test, Build & Push
 
-name: Backend CI - Test, Build and Push Images to ACR
-
-# Trigger the workflow on pushes to the 'main' branch
-# You can also add 'pull_request:' to run on PRs
 on:
-  # Manual trigger
-  workflow_dispatch:
-
-  # Automatically on pushes to main branch
-  push:
-    branches:
-      - main
-    paths: # Only trigger if changes are in backend directories
+  pull_request:
+    branches: [dev]
+    paths:
       - 'backend/**'
-      - '.github/workflows/backend_ci.yml' # Trigger if this workflow file changes
+      - '.github/workflows/backend-ci.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
 
-# Define global environment variables that can be used across jobs
+permissions:
+  contents: read
+  id-token: write   # for OIDC if you choose it later
+  packages: write
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  ACR_NAME: ${{ secrets.AZURE_CONTAINER_REGISTRY }}       # short name e.g. w08thariacr
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}       # full FQDN e.g. w08thariacr.azurecr.io
-  IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
-
+  ACR_NAME: ${{ secrets.AZURE_CONTAINER_REGISTRY }}      # e.g., w08thariacr
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}      # e.g., w08thariacr.azurecr.io
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  # Job 1: Run tests and linting for all backend services
-  test_and_lint_backends:
-    runs-on: ubuntu-latest # Use a GitHub-hosted runner
-
+  test:
+    runs-on: ubuntu-latest
     services:
-      # Product DB container
       product_db:
         image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: products
-        # Make pg_isready available so the service is healthy before tests run
+        env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: products }
         options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-      
-      # Order DB
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
       order_db:
         image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: orders
-        ports:
-          - 5433:5432
+        env: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: orders }
         options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5433:5432"]
     steps:
-      # 1. Checkout the repository code to the runner
-      - name: Checkout repository
-        uses: actions/checkout@v4 # Action to check out your repository code
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.10' }
 
-      # 2. Set up Python environment
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5 # Action to set up Python environment
+      - name: Cache pip
+        uses: actions/cache@v4
         with:
-          python-version: '3.10'
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('backend/**/requirements.txt') }}
 
-      # 3. Install dependencies and run code quality checks
-      - name: Install dependencies
-        run: | # Use a multi-line script to install pip dependencies
-          pip install --upgrade pip
-          # Loop through each backend service folder
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
           for req in backend/*/requirements.txt; do
-            echo "Installing $req"
-            pip install -r "$req"
+            echo "Installing $req"; pip install -r "$req"
           done
-          # Install CI tools
           pip install pytest httpx
 
-      # 5. Run tests for product service
-      - name: Run product_service tests
+      - name: Test product_service
         working-directory: backend/product_service
         env:
           POSTGRES_HOST: localhost
@@ -92,11 +69,9 @@ jobs:
           POSTGRES_DB: products
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        run: |
-          pytest tests --maxfail=1 --disable-warnings -q
-      
-      # 6. Run tests for order service
-      - name: Run order_service tests
+        run: pytest tests --maxfail=1 --disable-warnings -q
+
+      - name: Test order_service
         working-directory: backend/order_service
         env:
           POSTGRES_HOST: localhost
@@ -104,41 +79,44 @@ jobs:
           POSTGRES_DB: orders
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-        run: |
-          pytest tests --maxfail=1 --disable-warnings -q
+        run: pytest tests --maxfail=1 --disable-warnings -q
 
-  # Job 2: Build and Push Docker Images (runs only if tests pass)
-  build_and_push_images:
+  build_and_push:
+    if: github.event_name == 'push'
+    needs: test
     runs-on: ubuntu-latest
-    needs: test_and_lint_backends
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    # Azure login using a Service Principal secret
-    - name: Azure Login
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }} # Needs to be set as a GitHub Secret (Service Principal JSON)
+      # Option A (current): Service Principal JSON secret
+      - name: Azure Login (SP secret)
+        if: secrets.AZURE_CREDENTIALS != ''
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Login to Azure Container Registry (ACR)
-    - name: Login to Azure Container Registry
-      run: az acr login --name ${{ env.ACR_NAME }}
+      # Option B (recommended): OIDC (no stored secrets) – set these repo secrets to the IDs (not secrets)
+      - name: Azure Login (OIDC)
+        if: secrets.AZURE_CREDENTIALS == ''
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    # Build and Push Docker image for Product Service
-    - name: Build and Push Product Service Image
-      run: |
-        docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:latest ./backend/product_service/
-        docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:latest
+      - name: ACR login
+        run: az acr login --name ${{ env.ACR_NAME }}
 
-    # Build and Push Docker image for Order Service
-    - name: Build and Push Order Service Image
-      run: |
-        docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:latest ./backend/order_service/
-        docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
+      - name: Build & Push product_service
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ./backend/product_service/
+          docker tag  ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/product_service:latest
+          docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:latest
 
-    # Logout from Azure for security (runs even if image push fails)
-    - name: Logout from Azure
-      run: az logout
-      if: always()
+      - name: Build & Push order_service
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ./backend/order_service/
+          docker tag  ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
+          docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+          docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
