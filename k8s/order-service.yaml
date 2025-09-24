@@ -3,7 +3,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: order-service-w08e1 # Deployment name matches
+  name: order-service-w08e1
   labels:
     app: order-service
 spec:
@@ -16,13 +16,19 @@ spec:
       labels:
         app: order-service
     spec:
+      # [MOD] allow the pod to pull from ACR using the secret created by the workflow
+      imagePullSecrets:
+        - name: acr-pull
+
       containers:
       - name: order-service-container
-        image: w08thariacr.azurecr.io/order_service:latest
+        # [MOD] point to your ACR (w08tmtlt)
+        image: w08tmtlt.azurecr.io/order_service:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 8001
         env:
+        # Database connection details
         - name: POSTGRES_HOST
           value: order-db-service-w08e1
         - name: POSTGRES_DB
@@ -40,11 +46,11 @@ spec:
             secretKeyRef:
               name: ecomm-secrets-w08e1
               key: POSTGRES_PASSWORD
+
+        # Internal URL to Product API (ClusterIP service)
         - name: PRODUCT_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: ecomm-config-w08e1
-              key: PRODUCT_SERVICE_URL
+          value: http://product-service-w08e1:8000
+
 ---
 apiVersion: v1
 kind: Service
