@@ -1,4 +1,4 @@
-name: CD — Deploy Backend to AKS (and trigger Frontend)
+name: CD - Deploy Backend Services to AKS
 
 on:
   workflow_dispatch:
@@ -11,37 +11,19 @@ on:
         description: 'Resource Group of the AKS Cluster'
         required: true
         default: '<resource_group_name>'
-      namespace:
-        description: 'K8s namespace'
+      aks_acr_name:
+        description: 'Name of ACR'
         required: true
-        default: 'w08'
-      product_service_name:
-        description: 'K8s Service name for product API'
-        required: true
-        default: 'product-service-w08e1'
-      order_service_name:
-        description: 'K8s Service name for order API'
-        required: true
-        default: 'order-service-w08e1'
-
-permissions:
-  id-token: write
-  contents: read
-
-concurrency:
-  group: deploy-backend-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  ACR_NAME: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+        default: '<acr_name>'
 
 jobs:
   deploy_backend:
     runs-on: ubuntu-latest
+    environment: Production
+
     outputs:
-      PRODUCT_API_IP: ${{ steps.capture.outputs.product_ip }}
-      ORDER_API_IP:   ${{ steps.capture.outputs.order_ip }}
+      PRODUCT_API_IP: ${{ steps.get_product_ip.outputs.external_ip }}
+      ORDER_API_IP:   ${{ steps.get_order_ip.outputs.external_ip }}
 
     steps:
       - name: Checkout repository
@@ -56,85 +38,48 @@ jobs:
       - name: Set Kubernetes context (get AKS credentials)
         run: |
           az aks get-credentials \
-            --resource-group ${{ inputs.aks_resource_group }} \
-            --name ${{ inputs.aks_cluster_name }} \
+            --resource-group ${{ github.event.inputs.aks_resource_group }} \
+            --name ${{ github.event.inputs.aks_cluster_name }} \
             --overwrite-existing
 
-      # Best-effort attach; ignore RBAC error if not Owner/User Access Admin
-      - name: Attach ACR (best-effort)
-        run: |
-          echo "Attempting az aks update --attach-acr (RBAC errors will be ignored)"
-          az aks update \
-            --name ${{ inputs.aks_cluster_name }} \
-            --resource-group ${{ inputs.aks_resource_group }} \
-            --attach-acr ${{ env.ACR_NAME }} || true
-
-      # Create imagePullSecret if ACR admin creds are provided; otherwise skip
-      - name: Create imagePullSecret
-        run: |
-          if [ -z "${{ secrets.ACR_USERNAME }}" ] || [ -z "${{ secrets.ACR_PASSWORD }}" ]; then
-            echo "ACR_USERNAME or ACR_PASSWORD not set; skipping pull secret creation."
-          else
-            kubectl get ns ${{ inputs.namespace }} >/dev/null 2>&1 || kubectl create ns ${{ inputs.namespace }}
-            kubectl -n ${{ inputs.namespace }} delete secret acr-pull --ignore-not-found
-            kubectl -n ${{ inputs.namespace }} create secret docker-registry acr-pull \
-              --docker-server=${{ env.ACR_LOGIN_SERVER }} \
-              --docker-username='${{ secrets.ACR_USERNAME }}' \
-              --docker-password='${{ secrets.ACR_PASSWORD }}'
-          fi
-
-      - name: Ensure namespace exists
-        run: |
-          kubectl get ns ${{ inputs.namespace }} >/dev/null 2>&1 || kubectl create ns ${{ inputs.namespace }}
+      # Optional: attach ACR if your role allows it
+      # - name: Attach ACR (best-effort)
+      #   run: |
+      #     az aks update \
+      #       --name ${{ github.event.inputs.aks_cluster_name }} \
+      #       --resource-group ${{ github.event.inputs.aks_resource_group }} \
+      #       --attach-acr ${{ github.event.inputs.aks_acr_name }} || true
 
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         run: |
-          echo "Applying configmaps, secrets, and databases..."
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/configmaps.yaml
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/secrets.yaml
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/product-db.yaml
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/order-db.yaml
+          echo "Deploying backend infrastructure..."
+          cd k8s/
+          kubectl apply -f configmaps.yaml
+          kubectl apply -f secrets.yaml
+          kubectl apply -f product-db.yaml
+          kubectl apply -f order-db.yaml
 
       - name: Deploy Backend Microservices (Product, Order)
         run: |
-          echo "Applying product and order services..."
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/product-service.yaml
-          kubectl -n ${{ inputs.namespace }} apply -f k8s/order-service.yaml
-          kubectl -n ${{ inputs.namespace }} get deploy,svc,pods -o wide
+          echo "Deploying backend microservices..."
+          cd k8s/
+          kubectl apply -f product-service.yaml
+          kubectl apply -f order-service.yaml
 
-      # Rollout checks for actual deployment names present in your files
-      - name: Wait for Deployments to roll out
-        run: |
-          kubectl -n ${{ inputs.namespace }} rollout status deploy/product-service-w08e1 --timeout=180s || true
-          kubectl -n ${{ inputs.namespace }} rollout status deploy/order-service-w08e1   --timeout=180s || true
-
+      # --- MOD: robust wait for LB addresses (IP or hostname), 10 min, namespace-aware
       - name: Wait for Backend LoadBalancer IPs
-        id: capture
+        id: capture_ips
         env:
-          PRODSVC: ${{ inputs.product_service_name }}
-          ORDERSVC: ${{ inputs.order_service_name }}
+          NS: default                       # change if your services are in another namespace
+          PRODSVC: product-service-w08e1
+          ORDERSVC: order-service-w08e1
         run: |
-          echo "Waiting for LoadBalancer IPs..."
+          echo "Waiting for LoadBalancer IPs in namespace: $NS ..."
           PRODUCT_IP=""
           ORDER_IP=""
-          for i in $(seq 1 60); do
-            PRODUCT_IP=$(kubectl -n ${{ inputs.namespace }} get svc "$PRODSVC" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            ORDER_IP=$(kubectl -n ${{ inputs.namespace }} get svc "$ORDERSVC" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
-              echo "product_ip=$PRODUCT_IP" >> $GITHUB_OUTPUT
-              echo "order_ip=$ORDER_IP"     >> $GITHUB_OUTPUT
-              break
-            fi
-            sleep 5
-          done
-          [[ -z "${PRODUCT_IP}" || -z "${ORDER_IP}" ]] && { echo "Error: LB IPs not assigned in time."; exit 1; }
 
-  deploy_frontend:
-    needs: deploy_backend
-    uses: ./.github/workflows/frontend-cd.yml
-    with:
-      product_api_ip: http://${{ needs.deploy_backend.outputs.PRODUCT_API_IP }}:8000
-      order_api_ip:   http://${{ needs.deploy_backend.outputs.ORDER_API_IP }}:8001
-      aks_cluster_name: ${{ inputs.aks_cluster_name }}
-      aks_resource_group: ${{ inputs.aks_resource_group }}
-    secrets: inherit
+          # 120 * 5s = 10 minutes
+          for i in $(seq 1 120); do
+            echo "Attempt $i/120 ..."
+            # Try IP first
+            PIP=$(kubectl -n "$NS" get svc "$PRODSVC" -o jsonpath='{.status
