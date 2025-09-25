@@ -1,85 +1,40 @@
-name: CD - Deploy Backend Services to AKS
+- name: Wait for Backend LoadBalancer IPs
+  id: capture_ips
+  shell: bash
+  env:
+    NS: default
+    PRODSVC: product-service-w08e1
+    ORDERSVC: order-service-w08e1
+  run: |
+    echo "Waiting for LoadBalancer IPs in namespace: $NS ..."
+    PRODUCT_IP=""
+    ORDER_IP=""
 
-on:
-  workflow_dispatch:
-    inputs:
-      aks_cluster_name:
-        description: 'Name of the AKS Cluster to deploy to'
-        required: true
-        default: '<aks_cluster_name>'
-      aks_resource_group:
-        description: 'Resource Group of the AKS Cluster'
-        required: true
-        default: '<resource_group_name>'
-      aks_acr_name:
-        description: 'Name of ACR'
-        required: true
-        default: '<acr_name>'
+    for i in {1..120}; do     # 10 minutes (120 x 5s)
+      echo "Attempt $i/120 ..."
+      # try IP first
+      PIP=$(kubectl -n "$NS" get svc "$PRODSVC" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+      OIP=$(kubectl -n "$NS" get svc "$ORDERSVC" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+      # fallback to hostname
+      if [[ -z "$PIP" ]]; then
+        PIP=$(kubectl -n "$NS" get svc "$PRODSVC" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      fi
+      if [[ -z "$OIP" ]]; then
+        OIP=$(kubectl -n "$NS" get svc "$ORDERSVC" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+      fi
 
-jobs:
-  deploy_backend:
-    runs-on: ubuntu-latest
-    environment: Production
+      if [[ -n "$PIP" && -n "$OIP" ]]; then
+        echo "Resolved addresses: product=$PIP order=$OIP"
+        echo "PRODUCT_IP=$PIP" >> "$GITHUB_ENV"
+        echo "ORDER_IP=$OIP"   >> "$GITHUB_ENV"
+        kubectl -n "$NS" get svc "$PRODSVC" "$ORDERSVC" -o wide
+        exit 0
+      fi
+      sleep 5
+    done
 
-    outputs:
-      PRODUCT_API_IP: ${{ steps.get_product_ip.outputs.external_ip }}
-      ORDER_API_IP:   ${{ steps.get_order_ip.outputs.external_ip }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-          enable-AzPSSession: true
-
-      - name: Set Kubernetes context (get AKS credentials)
-        run: |
-          az aks get-credentials \
-            --resource-group ${{ github.event.inputs.aks_resource_group }} \
-            --name ${{ github.event.inputs.aks_cluster_name }} \
-            --overwrite-existing
-
-      # Optional: attach ACR if your role allows it
-      # - name: Attach ACR (best-effort)
-      #   run: |
-      #     az aks update \
-      #       --name ${{ github.event.inputs.aks_cluster_name }} \
-      #       --resource-group ${{ github.event.inputs.aks_resource_group }} \
-      #       --attach-acr ${{ github.event.inputs.aks_acr_name }} || true
-
-      - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
-        run: |
-          echo "Deploying backend infrastructure..."
-          cd k8s/
-          kubectl apply -f configmaps.yaml
-          kubectl apply -f secrets.yaml
-          kubectl apply -f product-db.yaml
-          kubectl apply -f order-db.yaml
-
-      - name: Deploy Backend Microservices (Product, Order)
-        run: |
-          echo "Deploying backend microservices..."
-          cd k8s/
-          kubectl apply -f product-service.yaml
-          kubectl apply -f order-service.yaml
-
-      # --- MOD: robust wait for LB addresses (IP or hostname), 10 min, namespace-aware
-      - name: Wait for Backend LoadBalancer IPs
-        id: capture_ips
-        env:
-          NS: default                       # change if your services are in another namespace
-          PRODSVC: product-service-w08e1
-          ORDERSVC: order-service-w08e1
-        run: |
-          echo "Waiting for LoadBalancer IPs in namespace: $NS ..."
-          PRODUCT_IP=""
-          ORDER_IP=""
-
-          # 120 * 5s = 10 minutes
-          for i in $(seq 1 120); do
-            echo "Attempt $i/120 ..."
-            # Try IP first
-            PIP=$(kubectl -n "$NS" get svc "$PRODSVC" -o jsonpath='{.status
+    echo "Timed out waiting for LoadBalancer addresses."
+    kubectl -n "$NS" get svc "$PRODSVC" "$ORDERSVC" -o wide || true
+    kubectl -n "$NS" describe svc "$PRODSVC" || true
+    kubectl -n "$NS" describe svc "$ORDERSVC" || true
+    exit 1
