@@ -252,3 +252,62 @@ def test_delete_product_success(client: TestClient, db_session_for_test: Session
         .first()
     )
     assert deleted_product_in_db is None
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+# uses existing fixtures in this file: client, db_session_for_test, (and the Azure blob mock if present)
+
+def _mk(client: TestClient, name="HD Widget", price=9.99, stock=10):
+    r = client.post(
+        "/products/",
+        json={
+            "name": name,
+            "description": "extra tests",
+            "price": float(price),
+            "stock_quantity": stock,
+            "image_url": "http://example.com/seed.jpg",
+        },
+    )
+    assert r.status_code in (200, 201)
+    body = r.json()
+    return body.get("product_id") or body.get("id")
+
+def test_get_product_not_found_extra(client: TestClient):
+    r = client.get("/products/99999999")
+    assert r.status_code == 404
+
+def test_update_product_success_extra(client: TestClient, db_session_for_test: Session):
+    pid = _mk(client, name="Old", price=5.0, stock=3)
+    r = client.put(
+        f"/products/{pid}",
+        json={
+            "name": "New Name",
+            "description": "updated desc",
+            "price": 7.5,
+            "stock_quantity": 8,
+            "image_url": "http://example.com/new.png",
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["name"] == "New Name"
+    assert float(data["price"]) == 7.5
+    assert data["stock_quantity"] == 8
+
+def test_upload_image_invalid_type_extra(client: TestClient):
+    pid = _mk(client)
+    files = {"file": ("notes.txt", b"hello", "text/plain")}
+    r = client.post(f"/products/{pid}/upload-image", files=files)
+    assert r.status_code in (400, 415, 422)  # whichever your app returns for bad type
+
+def test_deduct_stock_success_extra(client: TestClient):
+    pid = _mk(client, stock=10)
+    r = client.patch(f"/products/{pid}/deduct-stock", json={"quantity_to_deduct": 3})
+    assert r.status_code == 200
+    assert r.json()["stock_quantity"] == 7
+
+def test_deduct_stock_insufficient_extra(client: TestClient):
+    pid = _mk(client, stock=2)
+    r = client.patch(f"/products/{pid}/deduct-stock", json={"quantity_to_deduct": 5})
+    assert r.status_code in (400, 422)
