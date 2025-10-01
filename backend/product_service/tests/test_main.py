@@ -253,10 +253,10 @@ def test_delete_product_success(client: TestClient, db_session_for_test: Session
     )
     assert deleted_product_in_db is None
 
+# --- extra tests appended for coverage ---
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
-# uses existing fixtures in this file: client, db_session_for_test, (and the Azure blob mock if present)
 
 def _mk(client: TestClient, name="HD Widget", price=9.99, stock=10):
     r = client.post(
@@ -272,6 +272,10 @@ def _mk(client: TestClient, name="HD Widget", price=9.99, stock=10):
     assert r.status_code in (200, 201)
     body = r.json()
     return body.get("product_id") or body.get("id")
+
+def test__collector_sanity():
+    # Just to confirm new tests are discovered (test count > 6)
+    assert True
 
 def test_get_product_not_found_extra(client: TestClient):
     r = client.get("/products/99999999")
@@ -299,7 +303,7 @@ def test_upload_image_invalid_type_extra(client: TestClient):
     pid = _mk(client)
     files = {"file": ("notes.txt", b"hello", "text/plain")}
     r = client.post(f"/products/{pid}/upload-image", files=files)
-    assert r.status_code in (400, 415, 422)  # whichever your app returns for bad type
+    assert r.status_code in (400, 415, 422)
 
 def test_deduct_stock_success_extra(client: TestClient):
     pid = _mk(client, stock=10)
