@@ -149,3 +149,14 @@ def test_order_delete_not_found(client: TestClient):
     r = client.delete(f"{base}/99999999")
     assert r.status_code == 404
 
+def test_order_get_invalid_id_type_is_422(client: TestClient):
+    base = _detect_orders_base(client)
+    # non-integer id should be a validation error, but still hits the route/validation code
+    r = client.get(f"{base}/abc")
+    assert r.status_code in (400, 422)
+
+def test_orders_method_not_allowed_on_collection(client: TestClient):
+    base = _detect_orders_base(client)
+    # Hitting an unsupported method still exercises routing branches
+    r = client.put(f"{base}/")  # PUT on collection usually not allowed
+    assert r.status_code in (400, 405, 422)
