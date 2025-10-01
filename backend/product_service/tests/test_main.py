@@ -255,12 +255,21 @@ def test_delete_product_success(client: TestClient, db_session_for_test: Session
 
 # --- extra tests appended for coverage ---
 
+# ---- extra tests appended for coverage ----
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+def _detect_base(client: TestClient) -> str:
+    for base in ("/api/products", "/products"):
+        r = client.get(base)
+        if r.status_code in (200, 204, 422, 405):  # route exists
+            return base
+    return "/products"
+
 def _mk(client: TestClient, name="HD Widget", price=9.99, stock=10):
+    base = _detect_base(client)
     r = client.post(
-        "/products/",
+        f"{base}/",
         json={
             "name": name,
             "description": "extra tests",
@@ -274,17 +283,18 @@ def _mk(client: TestClient, name="HD Widget", price=9.99, stock=10):
     return body.get("product_id") or body.get("id")
 
 def test__collector_sanity():
-    # Just to confirm new tests are discovered (test count > 6)
-    assert True
+    assert True  # Confirms new tests are collected
 
 def test_get_product_not_found_extra(client: TestClient):
-    r = client.get("/products/99999999")
+    base = _detect_base(client)
+    r = client.get(f"{base}/99999999")
     assert r.status_code == 404
 
 def test_update_product_success_extra(client: TestClient, db_session_for_test: Session):
+    base = _detect_base(client)
     pid = _mk(client, name="Old", price=5.0, stock=3)
     r = client.put(
-        f"/products/{pid}",
+        f"{base}/{pid}",
         json={
             "name": "New Name",
             "description": "updated desc",
@@ -294,24 +304,33 @@ def test_update_product_success_extra(client: TestClient, db_session_for_test: S
         },
     )
     assert r.status_code == 200
-    data = r.json()
-    assert data["name"] == "New Name"
-    assert float(data["price"]) == 7.5
-    assert data["stock_quantity"] == 8
+    d = r.json()
+    assert d["name"] == "New Name"
+    assert float(d["price"]) == 7.5
+    assert d["stock_quantity"] == 8
 
 def test_upload_image_invalid_type_extra(client: TestClient):
+    base = _detect_base(client)
     pid = _mk(client)
     files = {"file": ("notes.txt", b"hello", "text/plain")}
-    r = client.post(f"/products/{pid}/upload-image", files=files)
+    r = client.post(f"{base}/{pid}/upload-image", files=files)
     assert r.status_code in (400, 415, 422)
 
 def test_deduct_stock_success_extra(client: TestClient):
+    base = _detect_base(client)
     pid = _mk(client, stock=10)
-    r = client.patch(f"/products/{pid}/deduct-stock", json={"quantity_to_deduct": 3})
+    r = client.patch(f"{base}/{pid}/deduct-stock", json={"quantity_to_deduct": 3})
     assert r.status_code == 200
     assert r.json()["stock_quantity"] == 7
 
 def test_deduct_stock_insufficient_extra(client: TestClient):
+    base = _detect_base(client)
     pid = _mk(client, stock=2)
-    r = client.patch(f"/products/{pid}/deduct-stock", json={"quantity_to_deduct": 5})
+    r = client.patch(f"{base}/{pid}/deduct-stock", json={"quantity_to_deduct": 5})
     assert r.status_code in (400, 422)
+
+def test_delete_then_404_extra(client: TestClient):
+    base = _detect_base(client)
+    pid = _mk(client)
+    assert client.delete(f"{base}/{pid}").status_code in (200, 204)
+    assert client.get(f"{base}/{pid}").status_code == 404
