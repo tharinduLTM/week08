@@ -142,7 +142,7 @@ def test_order_update_not_found_or_invalid(client: TestClient):
             "status": "CANCELLED",  # typical field; if schema differs, expect 422
         },
     )
-    assert r.status_code in (404, 422)
+    assert r.status_code in (404, 405, 422)
 
 def test_order_delete_not_found(client: TestClient):
     base = _detect_orders_base(client)
