@@ -337,8 +337,7 @@ def test_delete_then_404_extra(client: TestClient):
     assert client.delete(f"{base}/{pid}").status_code in (200, 204)
     assert client.get(f"{base}/{pid}").status_code == 404
 
-
-    def test_delete_then_404_extra(client):
+def test_delete_then_404_extra(client):
     base = _detect_base(client)
     pid = _mk(client)
     assert client.delete(f"{base}/{pid}").status_code in (200, 204)
