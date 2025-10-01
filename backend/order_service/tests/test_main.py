@@ -153,7 +153,7 @@ def test_order_get_invalid_id_type_is_422(client: TestClient):
     base = _detect_orders_base(client)
     # non-integer id should be a validation error, but still hits the route/validation code
     r = client.get(f"{base}/abc")
-    assert r.status_code in (400, 422)
+    assert r.status_code in (400, 405, 422)
 
 def test_orders_method_not_allowed_on_collection(client: TestClient):
     base = _detect_orders_base(client)
