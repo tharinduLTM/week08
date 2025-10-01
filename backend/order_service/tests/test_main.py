@@ -109,3 +109,43 @@ def test_health_check(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "order-service"}
+
+
+# ---- extra tests for order_service coverage ----
+from fastapi.testclient import TestClient
+
+def _detect_orders_base(client: TestClient) -> str:
+    for base in ("/api/orders", "/orders"):
+        r = client.get(base)
+        if r.status_code in (200, 204, 405, 422):  # route exists
+            return base
+    return "/orders"
+
+def test_orders_list_endpoint(client: TestClient):
+    base = _detect_orders_base(client)
+    r = client.get(f"{base}/")
+    assert r.status_code in (200, 204)
+    # When 200, payload should be a list
+    if r.status_code == 200:
+        assert isinstance(r.json(), list)
+
+def test_order_get_not_found(client: TestClient):
+    base = _detect_orders_base(client)
+    r = client.get(f"{base}/99999999")
+    assert r.status_code == 404
+
+def test_order_update_not_found_or_invalid(client: TestClient):
+    base = _detect_orders_base(client)
+    r = client.put(
+        f"{base}/99999999",
+        json={
+            "status": "CANCELLED",  # typical field; if schema differs, expect 422
+        },
+    )
+    assert r.status_code in (404, 422)
+
+def test_order_delete_not_found(client: TestClient):
+    base = _detect_orders_base(client)
+    r = client.delete(f"{base}/99999999")
+    assert r.status_code == 404
+
