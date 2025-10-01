@@ -1,0 +1,45 @@
+name: Backend CI (10.3HD) — Build & Push smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend_ci_hd.yml"
+
+env:
+  # Set these in your repo secrets (Settings → Secrets and variables → Actions)
+  # AZURE_CREDENTIALS: JSON from 'az ad sp create-for-rbac --sdk-auth'
+  # AZURE_CONTAINER_REGISTRY: e.g. thari10hdacr.azurecr.io
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build_and_push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Derive ACR name
+        id: acr
+        run: echo "name=$(echo '${{ env.ACR_LOGIN_SERVER }}' | cut -d. -f1)" >> $GITHUB_OUTPUT
+
+      - name: Docker login to ACR
+        run: az acr login --name ${{ steps.acr.outputs.name }}
+
+      # Build ONE service just to prove the pipeline + ACR are working.
+      # (We’ll extend to tests/coverage + Trivy + SBOM after this passes.)
+      - name: Build product_service image
+        run: docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ./backend/product_service
+
+      - name: Push product_service image
+        run: |
+          docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+          docker tag  ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
+          docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
