@@ -178,16 +178,31 @@ jobs:
           image: ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
           artifact-name: sbom-order.cdx.json
 
-      # Only push if both gates passed
-      - name: Push images (immutable + moving tag)
-        if: ${{ steps.trivy_gate_product.outcome == 'success' && steps.trivy_gate_order.outcome == 'success' }}
+      - name: Push product image (only if Trivy gate passed)
+        if: ${{ steps.trivy_gate_product.outcome == 'success' }}
         run: |
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
-          docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
           docker tag  ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
-          docker tag  ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}   ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
+
+      - name: Push order image (only if Trivy gate passed)
+        if: ${{ steps.trivy_gate_order.outcome == 'success' }}
+        run: |
+          docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+          docker tag  ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}   ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
+
+
+      # # Only push if both gates passed
+      # - name: Push images (immutable + moving tag)
+      #   if: ${{ steps.trivy_gate_product.outcome == 'success' && steps.trivy_gate_order.outcome == 'success' }}
+      #   run: |
+      #     docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+      #     docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+      #     docker tag  ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
+      #     docker tag  ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}   ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
+      #     docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
+      #     docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
 
       # # Fail the job at the end if any Trivy gate failed (so PRs are blocked) — after reports are uploaded
       # - name: Fail if any Trivy gate failed
