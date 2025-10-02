@@ -115,11 +115,10 @@ def test_openapi_driven_order_crud_happy_path(monkeypatch):
     Drive create -> get -> (put/patch) -> delete for orders using OpenAPI to build a valid payload,
     while mocking Product-service HTTP calls so CI doesn't need a live Product service.
     """
-    # --- Mock outbound calls to Product service (the app uses httpx) ---
     import httpx
 
     def _mock_json(url: str) -> dict:
-        # A minimal product object many templates expect
+        # Minimal product shape many templates expect
         return {
             "id": 1,
             "name": "Mock Product",
@@ -129,52 +128,98 @@ def test_openapi_driven_order_crud_happy_path(monkeypatch):
             "image_url": "http://example.com/x.png",
         }
 
-    def _mk_response(status: int, url: str, json_obj: Optional[dict] = None) -> httpx.Response:
-        return httpx.Response(status, request=httpx.Request("GET", url), json=json_obj)
-
-    # Save originals in case fall-through is needed
-    _orig_httpx_get = httpx.get
-    _orig_httpx_post = httpx.post
-    _orig_client_get = httpx.Client.get
-    _orig_client_post = httpx.Client.post
+    def _mk_response(method: str, url: str, status: int = 200, json_obj: Optional[dict] = None) -> httpx.Response:
+        return httpx.Response(status, request=httpx.Request(method.upper(), url), json=json_obj)
 
     def _is_product_url(url: str) -> bool:
         u = url.lower()
-        return "product" in u or "/products" in u
+        return ("product" in u) or ("/products" in u)
+
+    # ---------- Sync level ----------
+    _orig_httpx_get = httpx.get
+    _orig_httpx_post = httpx.post
+    _orig_httpx_request = httpx.request
+    _orig_client_get = httpx.Client.get
+    _orig_client_post = httpx.Client.post
+    _orig_client_request = httpx.Client.request
 
     def _fake_httpx_get(url, *a, **kw):
-        if isinstance(url, httpx.URL):
-            url = str(url)
-        if _is_product_url(url):
-            return _mk_response(200, url, _mock_json(url))
+        u = str(url)
+        if _is_product_url(u):
+            return _mk_response("GET", u, 200, _mock_json(u))
         return _orig_httpx_get(url, *a, **kw)
 
     def _fake_httpx_post(url, *a, **kw):
-        if isinstance(url, httpx.URL):
-            url = str(url)
-        if _is_product_url(url):
-            # e.g., stock reservation/validation
-            return _mk_response(200, url, {"ok": True})
+        u = str(url)
+        if _is_product_url(u):
+            return _mk_response("POST", u, 200, {"ok": True})
         return _orig_httpx_post(url, *a, **kw)
 
+    def _fake_httpx_request(method, url, *a, **kw):
+        u = str(url)
+        if _is_product_url(u):
+            return _mk_response(method, u, 200, {"ok": True})
+        return _orig_httpx_request(method, url, *a, **kw)
+
+    def _full_url(self, url):
+        # If a base_url is set and url is relative, join them
+        u = str(url)
+        if not u.startswith("http") and getattr(self, "base_url", None):
+            base = str(self.base_url).rstrip("/")
+            return f"{base}/{u.lstrip('/')}"
+        return u
+
     def _fake_client_get(self, url, *a, **kw):
-        if isinstance(url, httpx.URL):
-            url = str(url)
-        if _is_product_url(url):
-            return _mk_response(200, url, _mock_json(url))
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response("GET", u, 200, _mock_json(u))
         return _orig_client_get(self, url, *a, **kw)
 
     def _fake_client_post(self, url, *a, **kw):
-        if isinstance(url, httpx.URL):
-            url = str(url)
-        if _is_product_url(url):
-            return _mk_response(200, url, {"ok": True})
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response("POST", u, 200, {"ok": True})
         return _orig_client_post(self, url, *a, **kw)
+
+    def _fake_client_request(self, method, url, *a, **kw):
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response(method, u, 200, {"ok": True})
+        return _orig_client_request(self, method, url, *a, **kw)
 
     monkeypatch.setattr(httpx, "get", _fake_httpx_get)
     monkeypatch.setattr(httpx, "post", _fake_httpx_post)
+    monkeypatch.setattr(httpx, "request", _fake_httpx_request)
     monkeypatch.setattr(httpx.Client, "get", _fake_client_get)
     monkeypatch.setattr(httpx.Client, "post", _fake_client_post)
+    monkeypatch.setattr(httpx.Client, "request", _fake_client_request)
+
+    # ---------- Async level ----------
+    _orig_async_get = httpx.AsyncClient.get
+    _orig_async_post = httpx.AsyncClient.post
+    _orig_async_request = httpx.AsyncClient.request
+
+    async def _fake_async_get(self, url, *a, **kw):
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response("GET", u, 200, _mock_json(u))
+        return await _orig_async_get(self, url, *a, **kw)
+
+    async def _fake_async_post(self, url, *a, **kw):
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response("POST", u, 200, {"ok": True})
+        return await _orig_async_post(self, url, *a, **kw)
+
+    async def _fake_async_request(self, method, url, *a, **kw):
+        u = _full_url(self, url)
+        if _is_product_url(u):
+            return _mk_response(method, u, 200, {"ok": True})
+        return await _orig_async_request(self, method, url, *a, **kw)
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_async_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _fake_async_post)
+    monkeypatch.setattr(httpx.AsyncClient, "request", _fake_async_request)
 
     # --- Drive the API via OpenAPI ---
     spec = client.get("/openapi.json").json()
@@ -210,7 +255,7 @@ def test_openapi_driven_order_crud_happy_path(monkeypatch):
     r_get = client.get(built_get)
     assert r_get.status_code == 200, f"GET failed: {r_get.text}"
 
-    # PUT/PATCH if available (send back same payload; many APIs accept it)
+    # PUT/PATCH if available (send back same payload)
     for method in ("put", "patch"):
         upd_path = None
         for p, ops in orders_paths.items():
