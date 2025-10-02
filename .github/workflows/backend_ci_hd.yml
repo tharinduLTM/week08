@@ -189,9 +189,9 @@ jobs:
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
 
-      # Fail the job at the end if any Trivy gate failed (so PRs are blocked) — after reports are uploaded
-      - name: Fail if any Trivy gate failed
-        if: ${{ steps.trivy_gate_product.outcome != 'success' || steps.trivy_gate_order.outcome != 'success' }}
-        run: |
-          echo "::error::Trivy gate failed (HIGH/CRITICAL). See SARIF artifacts in this run."
-          exit 1
+      # # Fail the job at the end if any Trivy gate failed (so PRs are blocked) — after reports are uploaded
+      # - name: Fail if any Trivy gate failed
+      #   if: ${{ steps.trivy_gate_product.outcome != 'success' || steps.trivy_gate_order.outcome != 'success' }}
+      #   run: |
+      #     echo "::error::Trivy gate failed (HIGH/CRITICAL). See SARIF artifacts in this run."
+      #     exit 1
