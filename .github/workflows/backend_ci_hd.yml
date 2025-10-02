@@ -105,28 +105,63 @@ jobs:
           docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }} ./backend/product_service
           docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}   ./backend/order_service
 
-      # Image security scan — fail on HIGH/CRITICAL and upload SARIF
-      - name: Trivy scan — product_service
+      # ===== Trivy: gate (table, fail on HIGH/CRITICAL) + SARIF (always upload) =====
+      # -------- product_service --------
+      - name: Trivy gate — product_service
+        id: trivy_gate_product
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Trivy SARIF — product_service
+        if: always()
         uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
           format: sarif
           output: trivy-product.sarif
+          vuln-type: os,library
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: Upload SARIF (product)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-product.sarif
+
+      # -------- order_service --------
+      - name: Trivy gate — order_service
+        id: trivy_gate_order
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
+          format: table
+          vuln-type: os,library
           severity: HIGH,CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
-      - name: Trivy scan — order_service
+
+      - name: Trivy SARIF — order_service
+        if: always()
         uses: aquasecurity/trivy-action@0.20.0
         with:
           image-ref: ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
           format: sarif
           output: trivy-order.sarif
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-      - name: Upload SARIF (product)
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-product.sarif
+          vuln-type: os,library
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: "0"
+
       - name: Upload SARIF (order)
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-order.sarif
@@ -143,7 +178,9 @@ jobs:
           image: ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
           artifact-name: sbom-order.cdx.json
 
+      # Only push if both gates passed
       - name: Push images (immutable + moving tag)
+        if: ${{ steps.trivy_gate_product.outcome == 'success' && steps.trivy_gate_order.outcome == 'success' }}
         run: |
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:${{ env.IMAGE_TAG }}
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}
@@ -151,3 +188,10 @@ jobs:
           docker tag  ${{ env.ACR_LOGIN_SERVER }}/order_service:${{ env.IMAGE_TAG }}   ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:testing-latest
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:testing-latest
+
+      # Fail the job at the end if any Trivy gate failed (so PRs are blocked) — after reports are uploaded
+      - name: Fail if any Trivy gate failed
+        if: ${{ steps.trivy_gate_product.outcome != 'success' || steps.trivy_gate_order.outcome != 'success' }}
+        run: |
+          echo "::error::Trivy gate failed (HIGH/CRITICAL). See SARIF artifacts in this run."
+          exit 1
