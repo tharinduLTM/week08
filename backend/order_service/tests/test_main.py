@@ -161,3 +161,8 @@ def test_orders_method_not_allowed_on_collection(client: TestClient):
     r = client.put(f"{base}/")  # PUT on collection usually not allowed
     assert r.status_code in (400, 405, 422)
 
+def test_orders_method_not_allowed_on_collection(client: TestClient):
+    base = _detect_orders_base(client)
+    r = client.put(f"{base}/")  # PUT on collection usually not allowed
+    assert r.status_code in (400, 405, 422)
+
