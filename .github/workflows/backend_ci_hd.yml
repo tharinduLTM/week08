@@ -131,10 +131,10 @@ jobs:
           exit-code: "0"
 
       - name: Upload SARIF (product)
-        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-product.sarif
+          category: trivy-product
 
       # -------- order_service --------
       - name: Trivy gate — order_service
@@ -161,10 +161,10 @@ jobs:
           exit-code: "0"
 
       - name: Upload SARIF (order)
-        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-order.sarif
+          category: trivy-order
 
       # SBOM artifacts (CycloneDX)
       - name: SBOM — product
